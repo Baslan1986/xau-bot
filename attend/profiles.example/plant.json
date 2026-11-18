@@ -1,0 +1,17 @@
+{
+  "tenantId": "example-tenant",
+  "plantId": "example-plant-1",
+  "name": "Example Plant",
+  "timezone": "UTC",
+  "locale": "ar",
+  "polygons": {
+    "plant": [[10.000, 20.000], [10.000, 20.010], [10.010, 20.010], [10.010, 20.000]],
+    "site": null
+  },
+  "shifts": [
+    {"code": "D", "start": "07:00", "hours": 12, "label": "Day"},
+    {"code": "N", "start": "19:00", "hours": 12, "label": "Night"}
+  ],
+  "graceMinutes": 10,
+  "minStaff": 1
+}

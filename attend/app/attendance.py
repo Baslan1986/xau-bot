@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import geo
-from .models import Event, LeaveRequest, Shift, Station, User
+from .models import Event, LeaveRequest, Plant, Shift, User
 from .timeutil import now_utc
 
 # What each event is allowed to follow. None = no prior event (or last was depart).
@@ -45,8 +45,8 @@ def record(db: Session, user: User, etype: str, lat: float | None, lng: float | 
            mocked: bool = False) -> list[Event]:
     if etype not in LABEL:
         raise EventError("حركة غير معروفة")
-    station = db.get(Station, user.station_id) if user.station_id else None
-    if station is None:
+    plant = db.get(Plant, user.plant_id) if user.plant_id else None
+    if plant is None:
         raise EventError("ما في محطة معيّنة إلك، راجع الأدمن")
     ts = ts or now_utc()
     prev = last_event(db, user.id)
@@ -58,16 +58,16 @@ def record(db: Session, user: User, etype: str, lat: float | None, lng: float | 
         raise EventError(f"ما بتقدر تسجل {LABEL[etype]} هلأ. المتاح: {need}")
 
     flags: list[str] = []
-    in_station = in_site = None
+    in_plant = in_site = None
     if lat is None or lng is None:
         if etype in ("arrive", "enter") and not offline:
             raise EventError("لازم نعرف موقعك. فعّل الـ GPS وجرب مرة ثانية")
         flags.append("بدون موقع")
     else:
-        in_station = geo.point_in_polygon(lat, lng, geo.load(station.polygon))
-        site = geo.load(station.site_polygon)
-        in_site = geo.point_in_polygon(lat, lng, site) if site else in_station
-        if etype == "arrive" and not in_station:
+        in_plant = geo.point_in_polygon(lat, lng, geo.load(plant.polygon))
+        site = geo.load(plant.site_polygon)
+        in_site = geo.point_in_polygon(lat, lng, site) if site else in_plant
+        if etype == "arrive" and not in_plant:
             if not offline:
                 raise EventError("إنت مش داخل حدود المحطة. قرّب واستنى الـ GPS يثبت")
             flags.append("وصول خارج الحدود (بدون إنترنت)")
@@ -84,11 +84,11 @@ def record(db: Session, user: User, etype: str, lat: float | None, lng: float | 
 
     out: list[Event] = []
     if etype == "depart" and st == "enter":
-        out.append(Event(user_id=user.id, station_id=station.id, type="exit", ts=ts, lat=lat,
-                         lng=lng, accuracy=accuracy, inside_station=in_station,
+        out.append(Event(user_id=user.id, plant_id=plant.id, type="exit", ts=ts, lat=lat,
+                         lng=lng, accuracy=accuracy, inside_plant=in_plant,
                          inside_site=in_site, offline=offline, auto=True))
-    out.append(Event(user_id=user.id, station_id=station.id, type=etype, ts=ts, lat=lat, lng=lng,
-                     accuracy=accuracy, inside_station=in_station, inside_site=in_site,
+    out.append(Event(user_id=user.id, plant_id=plant.id, type=etype, ts=ts, lat=lat, lng=lng,
+                     accuracy=accuracy, inside_plant=in_plant, inside_site=in_site,
                      offline=offline, flagged=bool(flags) and flags != ["انسجلت بدون إنترنت"],
                      flag_reason="، ".join(flags) or None))
     db.add_all(out)
@@ -145,8 +145,8 @@ def compute(db: Session, user: User, lo: datetime, hi: datetime) -> list[ShiftRe
                                                    LeaveRequest.status == "approved",
                                                    LeaveRequest.start < hi,
                                                    LeaveRequest.end > lo)).all()
-    station = db.get(Station, user.station_id) if user.station_id else None
-    grace = station.grace_minutes if station else 0
+    plant = db.get(Plant, user.plant_id) if user.plant_id else None
+    grace = plant.grace_minutes if plant else 0
     sessions = _sessions(events, now)
     used: set[int] = set()
     results: list[ShiftResult] = []
@@ -176,12 +176,20 @@ def compute(db: Session, user: User, lo: datetime, hi: datetime) -> list[ShiftRe
                 r.notes.append("نسي يسجل انطلاق، انحسب لحد نهاية الشفت")
         else:
             r.status, end = "present", d
-        r.worked_min = max(0, int((end - a).total_seconds() // 60))
+        # Humane times: inside the grace window, an arrival counts as the shift start and a
+        # departure as the shift end (10:10 with 10 min grace counts as 10:00). Outside it, the
+        # real minutes count in full.
+        g = timedelta(minutes=grace)
+        a_eff = s.start if s.start < a <= s.start + g else a
+        end_eff = end
+        if r.status == "present" and s.end - g <= d <= s.end + g:
+            end_eff = s.end  # a few minutes either side of the end is just the end
+        r.worked_min = max(0, int((end_eff - a_eff).total_seconds() // 60))
         late = int((a - s.start).total_seconds() // 60)
         r.late_min = late if late > grace else 0
         if r.status == "present":
-            r.early_min = max(0, int((s.end - d).total_seconds() // 60))
-            r.overtime_min = max(0, int((d - s.end).total_seconds() // 60))
+            r.early_min = max(0, int((s.end - end_eff).total_seconds() // 60))
+            r.overtime_min = max(0, int((end_eff - s.end).total_seconds() // 60))
         dep = [lv for lv in on_leave if lv.kind == "departure"]
         if dep:
             r.notes.append("مغادرة معتمدة")

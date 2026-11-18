@@ -55,7 +55,9 @@ const fmtDay = (s) => { if (!s) return "—"; const d = new Date(s); return `${D
 const fmtDT = (s) => (s ? `${fmtDay(s)} ${fmtTime(s)}` : "—");
 const hm = (min) => { min = Math.round(min || 0); const h = Math.floor(min / 60), m = min % 60;
   return h ? `${h}س${m ? ` ${m}د` : ""}` : `${m}د`; };
-const kindName = (k) => (k === "D" ? "☀️ نهاري" : "🌙 ليلي");
+let SHIFT_LABELS = {};
+const setShiftLabels = (plants) => { for (const p of plants) for (const s of p.shifts || []) SHIFT_LABELS[`${p.id}:${s.code}`] = SHIFT_LABELS[s.code] = s.label; };
+const kindName = (k, pid) => `🕒 ${SHIFT_LABELS[`${pid}:${k}`] || SHIFT_LABELS[k] || k}`;
 const mapLink = (lat, lng) => `https://maps.google.com/?q=${encodeURIComponent(lat)},${encodeURIComponent(lng)}`;
 
 function openDialog(html, onSubmit) {
@@ -135,6 +137,7 @@ const S = { me: null, mode: "emp", tab: "home", atab: "live" };
 
 async function refreshMe() {
   S.me = await api("/api/me");
+  if (S.me.plant) setShiftLabels([S.me.plant]);
   const q = loadQ();
   if (q.length) S.me.state = q[q.length - 1].type, S.me.allowed = NEXT[S.me.state];
 }
@@ -194,7 +197,8 @@ function renderSetup(step = 1, data = {}) {
   }
   app.innerHTML = `<div class="center-screen"><form class="card narrow" id="f" style="width:100%">${steps}
     <h1>أول محطة ☀️</h1>
-    <div class="field"><label>اسم المحطة</label><input name="station_name" required minlength="2"></div>
+    <div class="field"><label>اسم المحطة</label><input name="plant_name" required minlength="2"></div>
+    <div class="field"><label>المنطقة الزمنية</label><input name="timezone" class="ltr" required value="${esc(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")}"></div>
     <div class="field"><label>حدود المحطة</label>${POLY_HELP}
       <textarea name="polygon" required placeholder="31.9012, 35.9031&#10;31.9050, 35.9100&#10;31.8990, 35.9120"></textarea></div>
     <div id="pv" class="map sm"></div>
@@ -230,7 +234,7 @@ function render() {
   const unread = S.me.unread + S.me.pending_cover;
   app.innerHTML = `
     <header class="topbar"><div class="brand"><img src="/static/icon.svg" alt=""> Solnerv</div>
-      <div class="row"><span class="small">${esc(S.me.station?.name || "")}</span>
+      <div class="row"><span class="small">${esc(S.me.plant?.name || "")}</span>
       <button class="btn sm" id="menu" aria-label="حسابي">👤</button></div></header>
     ${!navigator.onLine || loadQ().length ? `<div class="offline-bar">${!navigator.onLine ? "📴 بدون إنترنت. " : ""}${loadQ().length ? `${loadQ().length} حركة محفوظة، رح تنرفع لحالها` : "الحركات بتنحفظ وبتنرفع لما يرجع النت"}</div>` : ""}
     <main class="wrap narrow" id="main"></main>
@@ -288,9 +292,9 @@ function renderHome() {
     ${m.pending_cover ? `<div class="card" style="border-inline-start:5px solid var(--sun)"><b>🤝 في زميل طالب منك تغطية</b>
       <p class="small muted">شوف الطلب ورد عليه</p><button class="btn primary sm" id="goreq">افتح الطلبات</button></div>` : ""}
     ${heat ? `<div class="card" style="background:var(--warn-soft)"><b>🌡️ وقت الذروة</b><p class="small" style="margin:4px 0 0">اشرب مي كل 20 دقيقة، وخليك بالظل قدر الإمكان. سلامتك أهم إشي.</p></div>` : ""}
-    <div class="card shift-card">${cur ? `<div class="muted small">الشفت الحالي</div><h2>${kindName(cur.kind)}</h2>
+    <div class="card shift-card">${cur ? `<div class="muted small">الشفت الحالي</div><h2>${kindName(cur.code)}</h2>
         <div>${fmtTime(cur.start)} ← ${fmtTime(cur.end)} <span class="muted small">(${remain(cur.end)} باقي)</span></div>`
-      : next ? `<div class="muted small">شفتك الجاي</div><h2>${kindName(next.kind)} · ${fmtDay(next.start)}</h2>
+      : next ? `<div class="muted small">شفتك الجاي</div><h2>${kindName(next.code)} · ${fmtDay(next.start)}</h2>
         <div>${fmtTime(next.start)} ← ${fmtTime(next.end)} <span class="muted small">(بعد ${remain(next.start)})</span></div>`
       : `<div class="muted">ما في شفتات قريبة بجدولك</div>`}</div>
     <h3>هالشهر</h3>
@@ -383,7 +387,7 @@ async function renderSchedule() {
     <div id="att" style="margin-top:10px"></div></div>`;
   $("#mon").onchange = (e) => { S.month = e.target.value; renderSchedule(); };
   const [up, att] = await Promise.all([api("/api/me/schedule?days=30"), api(`/api/me/attendance?month=${month}`)]);
-  $("#up").innerHTML = up.length ? up.map((s) => `<li class="row between"><span><b>${fmtDay(s.start)}</b> · ${kindName(s.kind)}
+  $("#up").innerHTML = up.length ? up.map((s) => `<li class="row between"><span><b>${fmtDay(s.start)}</b> · ${kindName(s.code)}
     ${s.source === "substitute" ? '<span class="badge b-info">تغطية</span>' : ""}</span>
     <span class="muted">${fmtTime(s.start)} ← ${fmtTime(s.end)}</span></li>`).join("") : `<li class="empty">ما في شفتات</li>`;
   const sm = att.summary;
@@ -393,7 +397,7 @@ async function renderSchedule() {
       <div class="stat"><b>${sm.overtime_hours}</b><span>إضافي</span></div>
       <div class="stat"><b>${sm.absences}</b><span>غياب</span></div></div>
     <ul class="list" style="margin-top:10px">${att.days.map((d) => `<li><div class="row between">
-      <b>${fmtDay(d.shift?.start || d.arrive)} ${d.shift ? `· ${kindName(d.shift.kind)}` : ""}</b>${badge(STATUS[d.status])}</div>
+      <b>${fmtDay(d.shift?.start || d.arrive)} ${d.shift ? `· ${kindName(d.shift.code)}` : ""}</b>${badge(STATUS[d.status])}</div>
       <div class="small muted">${d.arrive ? `وصول ${fmtTime(d.arrive)} · انطلاق ${fmtTime(d.depart)} · ${hm(d.worked_min)}` : ""}
       ${d.late_min ? ` · <span style="color:var(--bad)">تأخير ${hm(d.late_min)}</span>` : ""}
       ${d.overtime_min ? ` · <span style="color:var(--ok)">إضافي ${hm(d.overtime_min)}</span>` : ""}
@@ -402,9 +406,17 @@ async function renderSchedule() {
 
 // ---------------------------------------------------------------- employee: requests
 async function renderRequests() {
-  $("#main").innerHTML = `<button class="btn primary" id="new" style="width:100%;margin-bottom:14px">➕ طلب إجازة أو مغادرة</button>
-    <div id="lists"><p class="muted">...</p></div>`;
-  $("#new").onclick = leaveDialog;
+  if (S.me.people_source === "solnerve") {
+    const url = /^https:\/\//.test(S.me.solnerve_url || "") ? S.me.solnerve_url : null;
+    $("#main").innerHTML = `<div class="card"><h2>الإجازات والمغادرات</h2>
+      <p>طلبات الإجازة والمغادرة بتنقدم من SolNerve. Attend بيتأكد إن زميلك البديل فاضي، وبيحدّث جدولك لحاله.</p>
+      ${url ? `<a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener">افتح SolNerve</a>` : ""}</div>
+      <div id="lists"></div>`;
+  } else {
+    $("#main").innerHTML = `<button class="btn primary" id="new" style="width:100%;margin-bottom:14px">➕ طلب إجازة أو مغادرة</button>
+      <div id="lists"><p class="muted">...</p></div>`;
+    $("#new").onclick = leaveDialog;
+  }
   const { mine, cover } = await api("/api/leaves/mine");
   const pendingCover = cover.filter((x) => x.status === "pending_substitute");
   $("#lists").innerHTML = `
@@ -414,13 +426,13 @@ async function renderRequests() {
         <div class="row" style="margin-top:8px"><button class="btn primary sm" data-acc="${r.id}">✅ بغطيه</button>
         <button class="btn sm" data-dec="${r.id}">ما بقدر</button></div></li>`).join("")}</ul></div>` : ""}
     <div class="card"><h2>طلباتي</h2><ul class="list">${mine.map((r) => `<li><div class="row between">
-      <b>${esc(r.kind_label)} · ${r.kind === "departure" ? `${r.amount} ساعة` : `${r.amount} شفت`}</b>${badge(LSTATUS[r.status])}</div>
+      <b>${esc(r.kind_label)} · ${r.kind === "departure" ? `${r.amount} ساعة` : `${r.amount} شفت`}</b>${badge(LSTATUS[r.status] || [r.status, ""])}</div>
       <div class="small muted">${fmtDT(r.start)} ← ${fmtDT(r.end)}${r.substitute ? ` · البديل: ${esc(r.substitute.name)}` : ""}
       ${r.admin_note ? ` · ${esc(r.admin_note)}` : ""}</div>
       ${["pending_substitute", "pending_admin"].includes(r.status) ? `<button class="btn ghost sm" data-cancel="${r.id}" style="margin-top:6px">إلغاء الطلب</button>` : ""}
       </li>`).join("") || `<li class="empty">ما قدمت طلبات لسا</li>`}</ul></div>
     ${cover.filter((x) => x.status !== "pending_substitute").length ? `<div class="card"><h3>تغطيات سابقة</h3><ul class="list">
-      ${cover.filter((x) => x.status !== "pending_substitute").map((r) => `<li class="row between"><span>${esc(r.user.name)} · ${fmtDay(r.start)}</span>${badge(LSTATUS[r.status])}</li>`).join("")}</ul></div>` : ""}`;
+      ${cover.filter((x) => x.status !== "pending_substitute").map((r) => `<li class="row between"><span>${esc(r.user.name)} · ${fmtDay(r.start)}</span>${badge(LSTATUS[r.status] || [r.status, ""])}</li>`).join("")}</ul></div>` : ""}`;
   const act = async (url, body, msg) => { try { await api(url, { body }); toast(msg); await refreshMe(); render(); } catch (e) { toast(e.message, true); } };
   $$("[data-acc]").forEach((b) => (b.onclick = () => act(`/api/leaves/${b.dataset.acc}/respond`, { accept: true }, "✅ شكراً! الطلب راح للإدارة")));
   $$("[data-dec]").forEach((b) => (b.onclick = () => act(`/api/leaves/${b.dataset.dec}/respond`, { accept: false }, "تم إبلاغ زميلك")));
@@ -489,7 +501,8 @@ const linkify = (t) => esc(t).replace(/https:\/\/maps\.google\.com\/\?q=[-\d.]+,
 
 // ---------------------------------------------------------------- admin
 const ATABS = [["live", "📡 مباشر"], ["requests", "📝 الطلبات"], ["employees", "👷 الموظفين"],
-               ["schedule", "📅 الجدول"], ["stations", "☀️ المحطات"], ["reports", "📊 التقارير"]];
+               ["schedule", "📅 الجدول"], ["plants", "☀️ المحطات"], ["reports", "📊 التقارير"]];
+const SOLNERVE = () => S.me?.people_source === "solnerve";
 let liveT;
 function renderAdmin() {
   stopPing(); clearInterval(liveT);
@@ -500,12 +513,16 @@ function renderAdmin() {
   $("#toemp").onclick = () => { S.mode = "emp"; S.tab = "home"; render(); };
   $("#out").onclick = async () => { await api("/api/logout", { body: {} }); S.me = null; renderLogin(); };
   $$(".admin-nav button").forEach((b) => (b.onclick = () => { S.atab = b.dataset.a; renderAdmin(); }));
-  const fn = { live: aLive, requests: aRequests, employees: aEmployees, schedule: aSchedule, stations: aStations, reports: aReports }[S.atab];
+  const fn = { live: aLive, requests: aRequests, employees: aEmployees, schedule: aSchedule, plants: aPlants, reports: aReports }[S.atab];
   fn().catch((e) => e.message !== "401" && toast(e.message, true));
 }
+const plantPolys = (p) => [{ points: p.polygons.plant, label: p.name },
+  ...(p.polygons.site ? [{ points: p.polygons.site, color: "#2563eb", label: `موقع ${p.name}` }] : [])];
+const shortCode = (code) => esc(code);
 
 async function aLive() {
   const d = await api("/api/admin/live");
+  setShiftLabels(d.plants);
   const present = d.people.filter((p) => p.state && p.state !== "depart");
   const onShift = d.people.filter((p) => p.on_shift);
   const missing = d.people.filter((p) => p.missing);
@@ -515,6 +532,8 @@ async function aLive() {
       <span class="small">${fmtDT(a.ts)}</span></div>${a.note ? `<div class="small">${esc(a.note)}</div>` : ""}
       <div class="row" style="margin-top:8px">${a.lat != null ? `<a class="btn sm" href="${mapLink(a.lat, a.lng)}" target="_blank" rel="noopener">📍 الموقع</a>` : ""}
       <button class="btn sm primary" data-res="${a.id}">تم التعامل</button></div></div>`).join("")}
+    ${d.name_questions ? `<div class="card" style="border-inline-start:5px solid var(--sun)"><b>❓ ${d.name_questions} اسم بحاجة تأكيد</b>
+      <p class="small muted">أسماء وصلت ومش عارفين مين صاحبها. ما بنخمّن، أكّدها من صفحة الموظفين.</p></div>` : ""}
     <div class="grid" style="margin-bottom:14px">
       <div class="stat"><b>${present.length}</b><span>موجودين هلأ</span></div>
       <div class="stat"><b>${onShift.length}</b><span>مناوبين حسب الجدول</span></div>
@@ -522,15 +541,15 @@ async function aLive() {
       <div class="stat"><b>${d.pending_leaves}</b><span>طلبات بانتظارك</span></div></div>
     <div class="grid2"><div class="card"><h2>الخريطة</h2><div class="map" id="map"></div></div>
       <div class="card"><h2>الموظفين</h2><div class="table-wrap"><table><thead><tr><th>الاسم</th><th>الحالة</th><th>من</th><th>الشفت</th></tr></thead><tbody>
-      ${d.people.filter((p) => p.station_id).map((p) => `<tr><td>${esc(p.name)}${p.team ? ` <span class="muted small">${esc(p.team)}</span>` : ""}</td>
+      ${d.people.filter((p) => p.plant_id).map((p) => `<tr><td>${esc(p.name)}${p.team ? ` <span class="muted small">${esc(p.team)}</span>` : ""}</td>
         <td>${p.missing ? badge(["ما وصل", "b-bad"]) : badge([STATE_TEXT[p.state], p.state && p.state !== "depart" ? "b-ok" : ""])}</td>
         <td class="small">${p.state && p.state !== "depart" ? fmtTime(p.since) : ""}</td>
-        <td class="small">${p.shift ? `${kindName(p.shift.kind)} ${fmtTime(p.shift.start)}-${fmtTime(p.shift.end)}` : "—"}</td></tr>`).join("")}
+        <td class="small">${p.shift ? `${kindName(p.shift.code, p.plant_id)} ${fmtTime(p.shift.start)}-${fmtTime(p.shift.end)}` : "—"}</td></tr>`).join("")}
       </tbody></table></div></div></div>
     ${d.flagged.length ? `<div class="card"><h2>⚠️ حركات بحاجة مراجعة (آخر يومين)</h2><ul class="list">${d.flagged.map((e) =>
       `<li class="row between"><span><b>${esc(e.name)}</b> · ${esc(e.label)} · <span class="small">${esc(e.flag_reason)}</span></span><span class="small muted">${fmtDT(e.ts)}</span></li>`).join("")}</ul></div>` : ""}
     <p class="small muted">بتتحدث تلقائياً كل 30 ثانية</p>`;
-  drawMap($("#map"), d.stations.flatMap((s) => [{ points: s.polygon, label: s.name }, ...(s.site_polygon ? [{ points: s.site_polygon, color: "#2563eb", label: `موقع ${s.name}` }] : [])]),
+  drawMap($("#map"), d.plants.flatMap(plantPolys),
     present.filter((p) => p.lat != null).map((p) => ({ lat: p.lat, lng: p.lng, label: p.name, color: colors[p.state], permanent: true })));
   $$("[data-res]").forEach((b) => (b.onclick = async () => { await api(`/api/admin/alerts/${b.dataset.res}/resolve`, { body: {} }); aLive(); }));
   clearInterval(liveT);
@@ -540,12 +559,14 @@ async function aLive() {
 async function aRequests() {
   const status = S.lfilter ?? "pending_admin";
   const [list, emps] = await Promise.all([api(`/api/admin/leaves${status ? `?status=${status}` : ""}`), api("/api/admin/employees")]);
-  $("#main").innerHTML = `<div class="row" style="margin-bottom:12px">${[["pending_admin", "بانتظاري"], ["pending_substitute", "بانتظار البديل"], ["approved", "مقبولة"], ["rejected", "مرفوضة"], ["", "الكل"]]
+  $("#main").innerHTML = `${SOLNERVE() ? `<div class="card" style="background:var(--info-soft)"><b>الإجازات بتنقدم وبتنعتمد من SolNerve.</b>
+      <p class="small" style="margin:4px 0 0">هون بتشوفها بس. Attend بيفحص الإنترلوك وبيحرّك الشفتات لما SolNerve يعتمد.</p></div>` : ""}
+    <div class="row" style="margin-bottom:12px">${[["pending_admin", "بانتظاري"], ["pending_substitute", "بانتظار البديل"], ["approved", "مقبولة"], ["rejected", "مرفوضة"], ["", "الكل"]]
       .map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${status === k}">${t}</button>`).join("")}</div>
-    <div class="card"><ul class="list">${list.map((r) => `<li><div class="row between"><b>${esc(r.user.name)} · ${esc(r.kind_label)} (${r.amount} ${r.kind === "departure" ? "ساعة" : "شفت"})</b>${badge(LSTATUS[r.status])}</div>
+    <div class="card"><ul class="list">${list.map((r) => `<li><div class="row between"><b>${esc(r.user.name)} · ${esc(r.kind_label)} (${r.amount} ${r.kind === "departure" ? "ساعة" : "شفت"})</b>${badge(LSTATUS[r.status] || [r.status, ""])}</div>
       <div class="small muted">${fmtDT(r.start)} ← ${fmtDT(r.end)} · البديل: ${r.substitute ? `${esc(r.substitute.name)} ${r.substitute_status === "accepted" ? "✅" : "⏳"}` : "—"}
-      ${r.reason ? ` · "${esc(r.reason)}"` : ""}${r.admin_note ? ` · ملاحظة: ${esc(r.admin_note)}` : ""}</div>
-      ${r.status === "pending_admin" ? `<div class="row" style="margin-top:8px">
+      ${r.reason ? ` · "${esc(r.reason)}"` : ""}${r.admin_note ? ` · ملاحظة: ${esc(r.admin_note)}` : ""}${r.source === "solnerve" ? " · من SolNerve" : ""}</div>
+      ${r.status === "pending_admin" && !SOLNERVE() ? `<div class="row" style="margin-top:8px">
         ${!r.substitute ? `<select data-sub="${r.id}" style="width:auto"><option value="">بدون بديل (حذف الشفتات)</option>${emps.filter((e) => e.active && e.id !== r.user.id).map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("")}</select>` : ""}
         <button class="btn primary sm" data-ok="${r.id}">✅ موافقة</button><button class="btn sm" data-no="${r.id}">رفض</button></div>` : ""}</li>`).join("")
       || `<li class="empty">ما في طلبات هون 👌</li>`}</ul></div>`;
@@ -560,31 +581,54 @@ async function aRequests() {
 }
 
 async function aEmployees() {
-  const [emps, teams, stations] = await Promise.all([api("/api/admin/employees"), api("/api/admin/teams"), api("/api/admin/stations")]);
-  S.cache = { teams, stations };
-  $("#main").innerHTML = `<div class="row" style="margin-bottom:12px"><button class="btn primary" id="add">➕ موظف</button>
-    <button class="btn" id="bulk">📋 إضافة مجموعة</button>${!teams.length ? `<span class="small muted">نصيحة: اعمل الفرق من صفحة الجدول أول، عشان تربط الموظفين فيها</span>` : ""}</div>
-    <div class="card table-wrap"><table><thead><tr><th>الاسم</th><th>الهاتف</th><th>الفريق</th><th>سنوي</th><th>مرضي</th><th>مغادرات</th><th></th></tr></thead><tbody>
+  const [emps, teams, plants, questions] = await Promise.all([api("/api/admin/employees"), api("/api/admin/teams"),
+    api("/api/admin/plants"), api("/api/admin/name-questions")]);
+  S.cache = { teams, plants };
+  const ro = SOLNERVE();
+  $("#main").innerHTML = `
+    ${questions.length ? `<div class="card" style="border-inline-start:5px solid var(--sun)"><h2>❓ أسماء بحاجة تأكيد</h2>
+      <p class="small muted">هاي الصيغ وصلت ومش مطابقة لأي اسم معروف. اختار صاحبها مرة وحدة، وبعدها النظام بيعرفها لحاله.</p>
+      <ul class="list">${questions.map((q) => `<li class="row between"><span><b>${esc(q.form)}</b> <span class="small muted">${esc(q.context || "")}</span></span>
+        <span class="row"><select data-q="${q.id}" style="width:auto"><option value="">مين هو؟</option>${emps.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join("")}</select>
+        <button class="btn sm primary" data-qa="${q.id}">تأكيد</button></span></li>`).join("")}</ul></div>` : ""}
+    ${ro ? `<div class="card" style="background:var(--info-soft)"><b>الموظفين بيجوا من SolNerve.</b>
+      <p class="small" style="margin:4px 0 0">الإضافة والتعديل بتصير هناك. هون بتقدر تحدد رقم وكلمة سر الدخول للتطبيق بس.</p></div>`
+      : `<div class="row" style="margin-bottom:12px"><button class="btn primary" id="add">➕ موظف</button>
+      <button class="btn" id="bulk">📋 إضافة مجموعة</button>${!teams.length ? `<span class="small muted">نصيحة: اعمل الفرق من صفحة الجدول أول، عشان تربط الموظفين فيها</span>` : ""}</div>`}
+    <div class="card table-wrap"><table><thead><tr><th>الاسم</th><th>صيغ الاسم</th><th>الفريق</th><th>سنوي</th><th>مرضي</th><th>مغادرات</th><th></th></tr></thead><tbody>
     ${emps.map((u) => `<tr style="opacity:${u.active ? 1 : .5}"><td>${esc(u.name)} ${u.role === "admin" ? badge(["أدمن", "b-info"]) : ""}<div class="small muted">${esc(u.job_title || "")}</div></td>
-      <td class="ltr">${esc(u.phone)}</td><td>${esc(u.team || "—")}</td><td>${u.annual_balance}</td><td>${u.sick_balance}</td><td>${u.departure_hours_balance}</td>
-      <td><button class="btn sm" data-ed="${u.id}">تعديل</button></td></tr>`).join("") || `<tr><td colspan="7" class="empty">ما في موظفين</td></tr>`}</tbody></table></div>`;
+      <td class="small">${u.aliases.filter((a) => a !== u.name).map(esc).join("، ") || "—"}</td><td>${esc(u.team || "—")}</td><td>${u.annual_balance}</td><td>${u.sick_balance}</td><td>${u.departure_hours_balance}</td>
+      <td class="row">${ro ? "" : `<button class="btn sm" data-ed="${u.id}">تعديل</button>`}<button class="btn sm ghost" data-login="${u.id}">🔑 دخول</button></td></tr>`).join("") || `<tr><td colspan="7" class="empty">ما في موظفين</td></tr>`}</tbody></table></div>`;
+  $$("[data-qa]").forEach((b) => (b.onclick = async () => {
+    const v = $(`[data-q="${b.dataset.qa}"]`).value;
+    if (!v) return toast("اختار الشخص أول", true);
+    try { await api(`/api/admin/name-questions/${b.dataset.qa}/answer`, { body: { user_id: Number(v) } }); toast("✅ انربط الاسم"); aEmployees(); } catch (e) { toast(e.message, true); }
+  }));
+  $$("[data-login]").forEach((b) => (b.onclick = () => {
+    const u = emps.find((x) => x.id == b.dataset.login);
+    openDialog(`<h2>دخول ${esc(u.name)} للتطبيق</h2>
+      <div class="field"><label>رقم الهاتف</label><input name="phone" class="ltr" required minlength="6" value="${esc(u.phone.startsWith("unset:") ? "" : u.phone)}"></div>
+      <div class="field"><label>كلمة سر جديدة</label><input name="password" required minlength="6" autocomplete="new-password"></div>${dlgButtons()}`,
+      async (f) => { await api(`/api/admin/employees/${u.id}/login`, { method: "PUT", body: { phone: f.get("phone"), password: f.get("password") } }); toast("✅ انحفظ"); aEmployees(); });
+  }));
+  if (ro) return;
   $("#add").onclick = () => empDialog();
   $$("[data-ed]").forEach((b) => (b.onclick = () => empDialog(emps.find((u) => u.id == b.dataset.ed))));
   $("#bulk").onclick = () => openDialog(`<h2>إضافة مجموعة موظفين</h2>
-    <p class="small muted">كل موظف بسطر: <b>الاسم، رقم الهاتف، الفريق، الوظيفة</b> (الفريق والوظيفة اختياريين). بتقدر تنسخهم من Excel.</p>
-    <div class="field"><textarea name="text" required placeholder="أحمد محمد، 0791234567، A، فني كهرباء&#10;سامي علي، 0797654321، B"></textarea></div>
-    <div class="field"><label>المحطة (للي ما إلهم فريق)</label><select name="station_id">${stations.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
+    <p class="small muted">كل موظف بسطر: <b>الاسم، رقم الهاتف، الفريق، الوظيفة</b> (الفريق والوظيفة اختياريين). بتقدر تنسخهم من Excel. إذا الاسم معروف من قبل، ما بنكرره.</p>
+    <div class="field"><textarea name="text" required placeholder="الاسم الكامل، 07XXXXXXXX، A، فني"></textarea></div>
+    <div class="field"><label>المحطة (للي ما إلهم فريق)</label><select name="plant_id">${plants.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
     <div class="field"><label>كلمة سر أولية للكل</label><input name="default_password" minlength="6" required value="${Math.random().toString().slice(2, 8)}"></div>
     <p class="small muted">بلّغ الموظفين يغيروها أول ما يدخلوا.</p>${dlgButtons("أضف")}`,
     async (f) => {
-      const r = await api("/api/admin/employees/bulk", { body: { text: f.get("text"), default_password: f.get("default_password"), station_id: Number(f.get("station_id")) } });
+      const r = await api("/api/admin/employees/bulk", { body: { text: f.get("text"), default_password: f.get("default_password"), plant_id: Number(f.get("plant_id")) } });
       toast(`✅ انضاف ${r.created.length} موظف${r.errors.length ? ` · ${r.errors.length} ملاحظة` : ""}`, r.errors.length > 0);
       if (r.errors.length) alert(r.errors.join("\n"));
       aEmployees();
     });
 }
 function empDialog(u = {}) {
-  const { teams, stations } = S.cache;
+  const { teams, plants } = S.cache;
   const isNew = !u.id;
   openDialog(`<h2>${isNew ? "موظف جديد" : esc(u.name)}</h2>
     <div class="grid"><div class="field"><label>الاسم</label><input name="name" required minlength="2" value="${esc(u.name)}"></div>
@@ -592,53 +636,66 @@ function empDialog(u = {}) {
     <div class="field"><label>الوظيفة</label><input name="job_title" value="${esc(u.job_title)}" placeholder="فني، مشرف، حارس..."></div>
     <div class="field"><label>${isNew ? "كلمة سر أولية" : "كلمة سر جديدة (اختياري)"}</label><input name="password" ${isNew ? "required" : ""} minlength="6" autocomplete="new-password"></div>
     <div class="field"><label>الفريق</label><select name="team_id"><option value="">—</option>${teams.map((t) => `<option value="${t.id}" ${u.team_id === t.id ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></div>
-    <div class="field"><label>المحطة</label><select name="station_id">${stations.map((s) => `<option value="${s.id}" ${u.station_id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>
+    <div class="field"><label>المحطة</label><select name="plant_id">${plants.map((s) => `<option value="${s.id}" ${u.plant_id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>
     <div class="field"><label>رصيد سنوي (شفت)</label><input name="annual_balance" type="number" step="0.5" min="0" value="${u.annual_balance ?? 14}"></div>
     <div class="field"><label>رصيد مرضي (شفت)</label><input name="sick_balance" type="number" step="0.5" min="0" value="${u.sick_balance ?? 14}"></div>
     <div class="field"><label>ساعات مغادرة</label><input name="departure_hours_balance" type="number" step="0.5" min="0" value="${u.departure_hours_balance ?? 8}"></div>
     <div class="field"><label>الصلاحية</label><select name="role"><option value="employee">موظف</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>أدمن (بوافق على الطلبات)</option></select></div></div>
+    <div class="field"><label>صيغ ثانية للاسم <span class="muted small">مفصولة بفاصلة، مثلاً الاسم الأول، اللقب + الاسم، اسم العيلة</span></label>
+      <input name="aliases" value="${esc((u.aliases || []).filter((a) => a !== u.name).join("، "))}"></div>
     <label class="row" style="font-weight:400"><input type="checkbox" name="active" ${u.active !== false ? "checked" : ""} style="width:auto;min-height:0"> فعّال</label>
     ${dlgButtons()}`,
     async (f) => {
       const body = { name: f.get("name"), phone: f.get("phone"), job_title: f.get("job_title") || null, password: f.get("password") || null,
-        team_id: f.get("team_id") ? Number(f.get("team_id")) : null, station_id: Number(f.get("station_id")) || null, role: f.get("role"),
+        team_id: f.get("team_id") ? Number(f.get("team_id")) : null, plant_id: Number(f.get("plant_id")) || null, role: f.get("role"),
         active: f.get("active") === "on", annual_balance: Number(f.get("annual_balance")), sick_balance: Number(f.get("sick_balance")),
-        departure_hours_balance: Number(f.get("departure_hours_balance")) };
+        departure_hours_balance: Number(f.get("departure_hours_balance")),
+        aliases: f.get("aliases").split(/[,،]/).map((x) => x.trim()).filter(Boolean) };
       await api(isNew ? "/api/admin/employees" : `/api/admin/employees/${u.id}`, { method: isNew ? "POST" : "PUT", body });
       toast("✅ انحفظ"); aEmployees();
     });
 }
 
-const PRESETS = [["D,D,D,D,D,D,D,N,N,N,N,N,N,N", "أسبوع نهار · أسبوع ليل (فريقين 24/7)"],
-                 ["D,D,N,N,O,O,O,O", "2 نهار · 2 ليل · 4 راحة"], ["D,D,D,D,O,O,O,O", "4 نهار · 4 راحة"],
-                 ["N,N,N,N,O,O,O,O", "4 ليل · 4 راحة"], ["D,O", "يوم ويوم"], ["D,D,D,D,D,D,O", "6 أيام · جمعة راحة"]];
+// Pattern presets are built from the plant's own shift codes, never hard-coded.
+function presetsFor(plant) {
+  const codes = (plant?.shifts || []).map((s) => s.code);
+  if (!codes.length) return [];
+  const rest = (n) => Array(n).fill("O");
+  const out = [[[...codes.flatMap((c) => Array(7).fill(c))], `أسبوع لكل شفت (${codes.join("/")})`],
+               [[...codes.flatMap((c) => [c, c]), ...rest(codes.length * 2)], "يومين لكل شفت، وبعدها راحة"]];
+  for (const c of codes) out.push([[c, c, c, c, ...rest(4)], `4 ${c} · 4 راحة`]);
+  return out.map(([p, n]) => [p.join(","), n]);
+}
 async function aSchedule() {
-  const [teams, stations, emps] = await Promise.all([api("/api/admin/teams"), api("/api/admin/stations"), api("/api/admin/employees")]);
-  const sid = S.sid || stations[0]?.id, start = S.sstart || today();
-  const sch = sid ? await api(`/api/admin/schedule?station_id=${sid}&start=${start}&days=14`) : { shifts: [], gaps: [] };
+  const [teams, plants, emps] = await Promise.all([api("/api/admin/teams"), api("/api/admin/plants"), api("/api/admin/employees")]);
+  setShiftLabels(plants);
+  const pid = S.pid || plants[0]?.id, start = S.sstart || today();
+  const plant = plants.find((p) => p.id == pid);
+  const sch = pid ? await api(`/api/admin/schedule?plant_id=${pid}&start=${start}&days=14`) : { shifts: [], gaps: [] };
   const days = [...Array(14)].map((_, i) => { const d = new Date(start + "T12:00"); d.setDate(d.getDate() + i); return localISO(d).slice(0, 10); });
-  const people = emps.filter((e) => e.station_id == sid && e.active);
+  const people = emps.filter((e) => e.plant_id == pid && e.active);
   const cell = (uid, day) => sch.shifts.find((s) => s.user_id === uid && s.start.slice(0, 10) === day);
+  const codeIdx = Object.fromEntries((plant?.shifts || []).map((s, i) => [s.code, i]));
   $("#main").innerHTML = `<div class="card"><div class="row between"><h2 style="margin:0">الفرق</h2><button class="btn primary sm" id="addt">➕ فريق</button></div>
     <ul class="list">${teams.map((t) => `<li class="row between"><span><b>فريق ${esc(t.name)}</b> · <span class="ltr small">${esc(t.pattern)}</span>
-      <span class="small muted">· يبدأ ${esc(t.anchor_date)} · ${people.filter((p) => p.team_id === t.id).length} موظف</span></span>
+      <span class="small muted">· يبدأ ${esc(t.anchor_date)} · ${emps.filter((p) => p.team_id === t.id).length} موظف</span></span>
       <span class="row"><button class="btn sm" data-gen="${t.id}">⚙️ ولّد الجدول</button><button class="btn sm ghost" data-et="${t.id}">تعديل</button></span></li>`).join("")
-      || `<li class="empty">ما في فرق. اعمل فريق A وفريق B، وحدد نمط كل واحد</li>`}</ul></div>
+      || `<li class="empty">ما في فرق. اعمل فريق لكل مجموعة، وحدد نمط دوامها</li>`}</ul></div>
     <div class="card"><div class="row between"><h2 style="margin:0">جدول 14 يوم</h2>
-      <div class="row"><select id="sid" style="width:auto">${stations.map((s) => `<option value="${s.id}" ${s.id == sid ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>
+      <div class="row"><select id="pid" style="width:auto">${plants.map((s) => `<option value="${s.id}" ${s.id == pid ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select>
       <input type="date" id="sst" value="${start}" style="width:auto"></div></div>
-      <p class="small muted">☀️ نهار · 🌙 ليل · الإطار المتقطع = تغطية بدل زميل · اكبس على أي خانة لتعدّلها</p>
+      <p class="small muted">${(plant?.shifts || []).map((s) => `<b>${esc(s.code)}</b> ${esc(s.label)} (${esc(s.start)})`).join(" · ")} · الإطار المتقطع = تغطية بدل زميل · اكبس على أي خانة لتعدّلها</p>
       <div class="table-wrap"><table class="sched"><thead><tr><th class="name"></th>${days.map((d) => `<th class="small">${fmtDay(d).replace(" ", "<br>")}</th>`).join("")}</tr></thead><tbody>
       ${people.map((p) => `<tr><th class="name">${esc(p.name)}</th>${days.map((d) => { const s = cell(p.id, d);
-        return `<td class="${s ? s.kind : ""} ${s?.source === "substitute" ? "sub" : ""}" data-u="${p.id}" data-d="${d}" ${s ? `data-s="${s.id}"` : ""}
-          title="${s?.covering_for_name ? `بدل ${esc(s.covering_for_name)}` : ""}" style="cursor:pointer">${s ? (s.kind === "D" ? "☀️" : "🌙") : "·"}</td>`; }).join("")}</tr>`).join("")}
+        return `<td class="${s ? (codeIdx[s.code] % 2 ? "N" : "D") : ""} ${s?.source === "substitute" ? "sub" : ""}" data-u="${p.id}" data-d="${d}" ${s ? `data-s="${s.id}"` : ""}
+          title="${s ? esc(s.label) : ""}${s?.covering_for_name ? ` · بدل ${esc(s.covering_for_name)}` : ""}" style="cursor:pointer">${s ? shortCode(s.code) : "·"}</td>`; }).join("")}</tr>`).join("")}
       <tr><th class="name small">نقص بالتغطية</th>${days.map((d) => { const g = sch.gaps.filter((x) => x.start.slice(0, 10) === d);
-        return `<td class="${g.length ? "gap" : ""} small">${g.map((x) => (x.kind === "D" ? "☀️" : "🌙")).join("")}</td>`; }).join("")}</tr>
+        return `<td class="${g.length ? "gap" : ""} small">${g.map((x) => shortCode(x.code)).join(" ")}</td>`; }).join("")}</tr>
       </tbody></table></div></div>`;
-  $("#sid") && ($("#sid").onchange = (e) => { S.sid = Number(e.target.value); aSchedule(); });
+  $("#pid") && ($("#pid").onchange = (e) => { S.pid = Number(e.target.value); aSchedule(); });
   $("#sst") && ($("#sst").onchange = (e) => { S.sstart = e.target.value; aSchedule(); });
-  $("#addt").onclick = () => teamDialog(stations);
-  $$("[data-et]").forEach((b) => (b.onclick = () => teamDialog(stations, teams.find((t) => t.id == b.dataset.et))));
+  $("#addt").onclick = () => teamDialog(plants);
+  $$("[data-et]").forEach((b) => (b.onclick = () => teamDialog(plants, teams.find((t) => t.id == b.dataset.et))));
   $$("[data-gen]").forEach((b) => (b.onclick = () => openDialog(`<h2>توليد الجدول</h2>
     <p class="small muted">بنعمل شفتات لكل موظفين الفريق حسب النمط. الشفتات اليدوية والتغطيات ما بتتغير.</p>
     <div class="grid"><div class="field"><label>من</label><input type="date" name="start" value="${today()}" required></div>
@@ -651,55 +708,68 @@ async function aSchedule() {
         async () => { await api(`/api/admin/shifts/${td.dataset.s}`, { method: "DELETE" }); toast("انحذف"); aSchedule(); });
     } else {
       openDialog(`<h2>إضافة شفت لـ ${esc(name)}</h2><p class="muted">${fmtDay(td.dataset.d)}</p>
-        <div class="row"><button class="btn primary" value="D">☀️ نهاري</button><button class="btn primary" value="N">🌙 ليلي</button><button class="btn ghost" value="cancel">إلغاء</button></div>`,
-        async (_, v) => { await api("/api/admin/shifts", { body: { user_id: Number(td.dataset.u), kind: v, day: td.dataset.d } }); toast("✅ انضاف"); aSchedule(); });
+        <div class="row">${(plant?.shifts || []).map((s) => `<button class="btn primary" value="${esc(s.code)}">${esc(s.label)}</button>`).join("")}<button class="btn ghost" value="cancel">إلغاء</button></div>`,
+        async (_, v) => { await api("/api/admin/shifts", { body: { user_id: Number(td.dataset.u), code: v, day: td.dataset.d } }); toast("✅ انضاف"); aSchedule(); });
     }
   }));
 }
-function teamDialog(stations, t = {}) {
+function teamDialog(plants, t = {}) {
   const body = openDialog(`<h2>${t.id ? `فريق ${esc(t.name)}` : "فريق جديد"}</h2>
     <div class="grid"><div class="field"><label>الاسم</label><input name="name" required value="${esc(t.name || "")}" placeholder="A"></div>
-    <div class="field"><label>المحطة</label><select name="station_id">${stations.map((s) => `<option value="${s.id}" ${t.station_id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div></div>
-    <div class="field"><label>نمط الدوام</label><div class="row" style="margin-bottom:8px">${PRESETS.map(([p, n]) => `<button type="button" class="chip" data-p="${p}">${n}</button>`).join("")}</div>
-      <input name="pattern" class="ltr" required value="${esc(t.pattern || "D,D,N,N,O,O,O,O")}">
-      <p class="small muted">D = نهار، N = ليل، O = راحة. النمط بيتكرر. للفريق الثاني نفس النمط بس مزاح، مثلاً O,O,O,O,D,D,N,N</p></div>
+    <div class="field"><label>المحطة</label><select name="plant_id">${plants.map((s) => `<option value="${s.id}" ${t.plant_id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div></div>
+    <div class="field"><label>نمط الدوام</label><div class="row" id="presets" style="margin-bottom:8px"></div>
+      <input name="pattern" class="ltr" required value="${esc(t.pattern || "")}">
+      <p class="small muted" id="phelp"></p></div>
     <div class="field"><label>أول يوم بالنمط</label><input type="date" name="anchor_date" required value="${esc(t.anchor_date || today())}"></div>${dlgButtons()}`,
     async (f) => {
-      const b = { name: f.get("name"), station_id: Number(f.get("station_id")), pattern: f.get("pattern"), anchor_date: f.get("anchor_date") };
+      const b = { name: f.get("name"), plant_id: Number(f.get("plant_id")), pattern: f.get("pattern"), anchor_date: f.get("anchor_date") };
       await api(t.id ? `/api/admin/teams/${t.id}` : "/api/admin/teams", { method: t.id ? "PUT" : "POST", body: b });
       toast("✅ انحفظ الفريق، هلأ ولّد الجدول"); aSchedule();
     });
-  $$("[data-p]", body).forEach((c) => (c.onclick = () => ($("[name=pattern]", body).value = c.dataset.p)));
+  const sel = $("[name=plant_id]", body);
+  const draw = () => {
+    const plant = plants.find((p) => p.id == sel.value);
+    $("#presets", body).innerHTML = presetsFor(plant).map(([p, n]) => `<button type="button" class="chip" data-p="${esc(p)}">${esc(n)}</button>`).join("");
+    $("#phelp", body).textContent = `الرموز: ${(plant?.shifts || []).map((s) => `${s.code} = ${s.label}`).join("، ")}، و O = راحة. النمط بيتكرر. للفريق الثاني نفس النمط بس مزاح.`;
+    $$("[data-p]", body).forEach((c) => (c.onclick = () => ($("[name=pattern]", body).value = c.dataset.p)));
+    if (!$("[name=pattern]", body).value) $("[name=pattern]", body).value = presetsFor(plant)[0]?.[0] || "";
+  };
+  sel.onchange = draw; draw();
 }
 
-async function aStations() {
-  const stations = await api("/api/admin/stations");
+async function aPlants() {
+  const plants = await api("/api/admin/plants");
   $("#main").innerHTML = `<div class="row" style="margin-bottom:12px"><button class="btn primary" id="adds">➕ محطة</button></div>
-    <div class="grid2">${stations.map((s) => `<div class="card"><div class="row between"><h2 style="margin:0">${esc(s.name)}</h2><button class="btn sm" data-es="${s.id}">تعديل</button></div>
-      <p class="small muted">الشفت ${s.shift_hours} ساعة · نهار ${esc(s.day_start)} · ليل ${esc(s.night_start)} · سماح ${s.grace_minutes} د · أقل عدد ${s.min_staff}</p>
+    <div class="grid2">${plants.map((s) => `<div class="card"><div class="row between"><h2 style="margin:0">${esc(s.name)}</h2><button class="btn sm" data-es="${s.id}">تعديل</button></div>
+      <p class="small muted ltr" style="text-align:start">${esc(s.tenantId)} / ${esc(s.plantId)} · ${esc(s.timezone)} · ${esc(s.locale)}</p>
+      <p class="small muted">${s.shifts.map((x) => `${esc(x.label)} ${esc(x.start)} (${x.hours}س)`).join(" · ")} · سماح ${s.graceMinutes} د · أقل عدد ${s.minStaff}</p>
       <div class="map sm" data-map="${s.id}"></div></div>`).join("")}</div>`;
-  stations.forEach((s) => drawMap($(`[data-map="${s.id}"]`), [{ points: s.polygon, label: "المحطة" }, ...(s.site_polygon ? [{ points: s.site_polygon, color: "#2563eb", label: "موقع العمل" }] : [])]));
-  $("#adds").onclick = () => stationDialog();
-  $$("[data-es]").forEach((b) => (b.onclick = () => stationDialog(stations.find((s) => s.id == b.dataset.es))));
+  plants.forEach((s) => drawMap($(`[data-map="${s.id}"]`), plantPolys(s)));
+  $("#adds").onclick = () => plantDialog();
+  $$("[data-es]").forEach((b) => (b.onclick = () => plantDialog(plants.find((s) => s.id == b.dataset.es))));
 }
-function stationDialog(s = {}) {
+function plantDialog(s = null) {
   const lines = (p) => (p || []).map((x) => x.join(", ")).join("\n");
-  const body = openDialog(`<h2>${s.id ? esc(s.name) : "محطة جديدة"}</h2>
-    <div class="field"><label>الاسم</label><input name="name" required minlength="2" value="${esc(s.name || "")}"></div>
-    <div class="field"><label>حدود المحطة (وصول / انطلاق)</label>${POLY_HELP}<textarea name="polygon" required>${esc(lines(s.polygon))}</textarea></div>
+  const shiftLines = (s?.shifts || []).map((x) => `${x.code}, ${x.start}, ${x.hours}, ${x.label}`).join("\n");
+  const body = openDialog(`<h2>${s ? esc(s.name) : "محطة جديدة"}</h2>
+    <p class="small muted">كل محطة بتنوصف بملف واحد: المنطقة الزمنية، الحدود، الشفتات، واللغة.</p>
+    <div class="grid"><div class="field"><label>الاسم</label><input name="name" required minlength="2" value="${esc(s?.name || "")}"></div>
+    <div class="field"><label>المنطقة الزمنية</label><input name="timezone" class="ltr" required value="${esc(s?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")}"></div>
+    <div class="field"><label>اللغة</label><input name="locale" class="ltr" value="${esc(s?.locale || "ar")}"></div></div>
+    <div class="field"><label>حدود المحطة (وصول / انطلاق)</label>${POLY_HELP}<textarea name="polygon" required>${esc(lines(s?.polygons.plant))}</textarea></div>
     <div class="field"><label>حدود موقع العمل (دخول / خروج) <span class="muted small">اختياري، إذا فاضي بنستعمل حدود المحطة</span></label>
-      <textarea name="site_polygon">${esc(lines(s.site_polygon))}</textarea></div>
+      <textarea name="site_polygon">${esc(lines(s?.polygons.site))}</textarea></div>
     <div id="pv" class="map sm" style="margin-bottom:12px"></div>
-    <div class="grid"><div class="field"><label>بداية النهار</label><input type="time" name="day_start" value="${esc(s.day_start || "07:00")}"></div>
-    <div class="field"><label>بداية الليل</label><input type="time" name="night_start" value="${esc(s.night_start || "19:00")}"></div>
-    <div class="field"><label>طول الشفت (ساعة)</label><input type="number" name="shift_hours" min="1" max="24" value="${s.shift_hours || 12}"></div>
-    <div class="field"><label>سماح التأخير (د)</label><input type="number" name="grace_minutes" min="0" max="120" value="${s.grace_minutes ?? 10}"></div>
-    <div class="field"><label>أقل عدد بالشفت</label><input type="number" name="min_staff" min="0" max="50" value="${s.min_staff ?? 1}"></div></div>${dlgButtons()}`,
+    <div class="field"><label>الشفتات <span class="muted small">كل شفت بسطر: الرمز، البداية، الساعات، الاسم</span></label>
+      <textarea name="shifts" required placeholder="D, 07:00, 12, نهاري&#10;N, 19:00, 12, ليلي">${esc(shiftLines)}</textarea></div>
+    <div class="grid"><div class="field"><label>سماح (دقيقة)</label><input type="number" name="grace_minutes" min="0" max="120" value="${s?.graceMinutes ?? 10}"></div>
+    <div class="field"><label>أقل عدد بالشفت</label><input type="number" name="min_staff" min="0" max="50" value="${s?.minStaff ?? 1}"></div></div>
+    <p class="small muted">السماح: اللي بيوصل خلال السماح بينحسب واصل على الوقت (10:10 = 10:00 إذا السماح 10 دقايق).</p>${dlgButtons()}`,
     async (f) => {
       const b = Object.fromEntries(f);
-      ["shift_hours", "grace_minutes", "min_staff"].forEach((k) => (b[k] = Number(b[k])));
-      await api(s.id ? `/api/admin/stations/${s.id}` : "/api/admin/stations", { method: s.id ? "PUT" : "POST", body: b });
-      toast("✅ انحفظت المحطة"); aStations();
+      ["grace_minutes", "min_staff"].forEach((k) => (b[k] = Number(b[k])));
+      await api(s ? `/api/admin/plants/${s.id}` : "/api/admin/plants", { method: s ? "PUT" : "POST", body: b });
+      toast("✅ انحفظت المحطة"); aPlants();
     });
   const site = $("[name=site_polygon]", body);
   wirePolyPreview($("[name=polygon]", body), $("#pv", body), () => [{ points: parsePolyClient(site.value), color: "#2563eb", label: "موقع العمل" }]);
@@ -708,25 +778,26 @@ function stationDialog(s = {}) {
 
 async function aReports() {
   const month = S.rmonth || today().slice(0, 7);
-  const stations = await api("/api/admin/stations");
-  const sid = S.rsid ?? "";
-  const rows = await api(`/api/admin/report?month=${month}${sid ? `&station_id=${sid}` : ""}`);
+  const plants = await api("/api/admin/plants");
+  setShiftLabels(plants);
+  const pid = S.rpid ?? "";
+  const rows = await api(`/api/admin/report?month=${month}${pid ? `&plant_id=${pid}` : ""}`);
   const tot = (k) => Math.round(rows.reduce((a, r) => a + r[k], 0) * 10) / 10;
   $("#main").innerHTML = `<div class="card"><div class="row between"><div class="row"><input type="month" id="rm" value="${month}" style="width:auto">
-      <select id="rs" style="width:auto"><option value="">كل المحطات</option>${stations.map((s) => `<option value="${s.id}" ${s.id == sid ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>
-      <a class="btn primary" href="/api/admin/report.csv?month=${month}${sid ? `&station_id=${sid}` : ""}">⬇️ Excel للرواتب</a></div></div>
+      <select id="rs" style="width:auto"><option value="">كل المحطات</option>${plants.map((s) => `<option value="${s.id}" ${s.id == pid ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>
+      <a class="btn primary" href="/api/admin/report.csv?month=${month}${pid ? `&plant_id=${pid}` : ""}">⬇️ Excel (ساعات الدوام)</a></div></div>
     <div class="grid" style="margin-bottom:14px"><div class="stat"><b>${tot("worked_hours")}</b><span>ساعة دوام</span></div>
       <div class="stat"><b>${tot("overtime_hours")}</b><span>ساعة إضافي</span></div><div class="stat"><b>${tot("absences")}</b><span>غياب</span></div>
       <div class="stat"><b>${hm(tot("late_minutes"))}</b><span>مجموع التأخير</span></div></div>
     <div class="card table-wrap"><table><thead><tr><th>الموظف</th><th>مجدول</th><th>فعلي</th><th>بالموقع</th><th>إضافي</th><th>تأخير</th><th>غياب</th><th>نسي انطلاق</th><th>إجازة</th></tr></thead><tbody>
     ${rows.map((r) => `<tr data-r="${r.user.id}" style="cursor:pointer"><td><b>${esc(r.user.name)}</b></td><td>${r.scheduled_hours}</td><td>${r.worked_hours}</td><td>${r.site_hours}</td>
       <td>${r.overtime_hours}</td><td>${hm(r.late_minutes)}</td><td>${r.absences ? badge([r.absences, "b-bad"]) : 0}</td><td>${r.missing_departs ? badge([r.missing_departs, "b-warn"]) : 0}</td><td>${r.leave_shifts}</td></tr>`).join("")}
-    </tbody></table></div><p class="small muted">اكبس على أي موظف لتشوف التفاصيل يوم بيوم</p>`;
+    </tbody></table></div><p class="small muted">اكبس على أي موظف لتشوف التفاصيل يوم بيوم. التقرير ساعات بس، بدون أي مبالغ.</p>`;
   $("#rm").onchange = (e) => { S.rmonth = e.target.value; aReports(); };
-  $("#rs").onchange = (e) => { S.rsid = e.target.value; aReports(); };
+  $("#rs").onchange = (e) => { S.rpid = e.target.value; aReports(); };
   $$("[data-r]").forEach((tr) => (tr.onclick = async () => {
     const d = await api(`/api/admin/report/${tr.dataset.r}?month=${month}`);
-    openDialog(`<h2>${esc(d.user.name)} · ${esc(month)}</h2><ul class="list">${d.days.map((x) => `<li><div class="row between"><b>${fmtDay(x.shift?.start || x.arrive)} ${x.shift ? kindName(x.shift.kind) : ""}</b>${badge(STATUS[x.status])}</div>
+    openDialog(`<h2>${esc(d.user.name)} · ${esc(month)}</h2><ul class="list">${d.days.map((x) => `<li><div class="row between"><b>${fmtDay(x.shift?.start || x.arrive)} ${x.shift ? kindName(x.shift.code, d.user.plant_id) : ""}</b>${badge(STATUS[x.status])}</div>
       <div class="small muted">${x.arrive ? `${fmtTime(x.arrive)} ← ${fmtTime(x.depart)} · ${hm(x.worked_min)} · بالموقع ${hm(x.site_min)}` : ""}${x.late_min ? ` · تأخير ${hm(x.late_min)}` : ""}${x.overtime_min ? ` · إضافي ${hm(x.overtime_min)}` : ""} ${x.notes.map(esc).join(" · ")}</div></li>`).join("") || `<li class="empty">ما في بيانات</li>`}</ul>
       <h3>كل الحركات</h3><ul class="list small">${d.events.map((e) => `<li class="row between"><span>${ICON[e.type]} ${esc(e.label)} ${e.flagged ? `⚠️ ${esc(e.flag_reason)}` : ""} ${e.lat != null ? `<a href="${mapLink(e.lat, e.lng)}" target="_blank" rel="noopener">📍</a>` : ""}</span><span class="muted">${fmtDT(e.ts)}</span></li>`).join("")}</ul>
       <div class="row"><button class="btn ghost" value="cancel">إغلاق</button></div>`);
